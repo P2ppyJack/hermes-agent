@@ -16,11 +16,16 @@ and the `/recall` flow.
 The multi-profile selector and cross-profile insert only render when 2+
 profiles are selected, so these two were captured against a running desktop
 build in multi-profile mode. They are framed tightly on the UI chrome (the
-"Select bots" selector and the node context menu); individual node labels are
-not legible and no memory content is shown. The only readable text is the
-control labels themselves and a public bundled skill name (`kanban-worker`).
+"Select bots" selector and the node context menu), excluding the search
+sidebar and other window chrome; individual node labels are not legible and
+no personal content is shown. The only readable text is the control labels
+themselves, a few public bundled skill names (e.g. `hermes-config-cli`,
+`back-up-my-hermes`), and one generic Hermes-mechanics memory (cron schedule
+syntax).
 
 - `12-multi-profile-selector.png` — the "Select bots" selector open, two
   profiles merged on one map.
-- `13-cross-profile-insert.png` — right-clicking a node in multi-profile mode
-  exposes the "Insert into <profile>" cross-profile action.
+- `13-cross-profile-insert.png` — right-clicking a memory node in
+  multi-profile mode exposes the "Insert into <profile>" cross-profile
+  action (submenu expanded on the target bot). Memory and conclusion nodes
+  can be inserted; skills are intentionally refused.
