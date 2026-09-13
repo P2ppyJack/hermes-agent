@@ -60,9 +60,43 @@ def _with_children_lock(parent_agent: Any, op: str, child: Any) -> None:
         getattr(parent_agent._active_children, op)(child)
 
 def _attach_child(parent_agent: Any, child: Any) -> None:
-    """Register the child for parent interrupt propagation."""
-    if hasattr(parent_agent, "_active_children"):
-        _with_children_lock(parent_agent, "append", child)
+    """Register the child for parent interrupt propagation.
+
+    Capture interrupt state while the child-list lock is held so a child built
+    after a parent Stop cannot miss the propagation snapshot.
+    """
+    if not hasattr(parent_agent, "_active_children"):
+        return
+    lock = getattr(parent_agent, "_active_children_lock", None)
+    if lock:
+        with lock:
+            parent_agent._active_children.append(child)
+            interrupted = bool(getattr(parent_agent, "_interrupt_requested", False))
+    else:
+        parent_agent._active_children.append(child)
+        interrupted = bool(getattr(parent_agent, "_interrupt_requested", False))
+    if not interrupted:
+        return
+
+    message = getattr(parent_agent, "_interrupt_message", None)
+    hard_event = getattr(parent_agent, "_hard_interrupt_requested", None)
+    hard_stop_is_set = getattr(hard_event, "is_set", None)
+    try:
+        if callable(hard_stop_is_set) and hard_stop_is_set():
+            if not request_hard_interrupt(
+                child,
+                message,
+                tool_reason=getattr(parent_agent, "_tool_interrupt_reason", None),
+            ) and hasattr(child, "_interrupt_requested"):
+                child._interrupt_requested = True
+        else:
+            interrupt = getattr(child, "interrupt", None)
+            if callable(interrupt):
+                interrupt(message)
+            elif hasattr(child, "_interrupt_requested"):
+                child._interrupt_requested = True
+    except Exception as exc:
+        logger.debug("Failed to propagate existing parent interrupt to child: %s", exc)
 
 def _detach_child(parent_agent: Any, child: Any) -> None:
     """Remove the child from parent interrupt propagation (no-op if absent)."""
