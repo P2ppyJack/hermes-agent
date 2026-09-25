@@ -9,6 +9,14 @@ from types import SimpleNamespace
 
 import pytest
 
+# Boot the process at collection, before the real-home I/O guard is armed:
+# ``_resolve_chat_argv`` lazily imports hermes_cli.main, whose import runs
+# hermes_bootstrap's dependency activation (stats the checkout's parent) and
+# the interrupted-pull check (stats the git dir). Importing it here, as many
+# upstream hermes_cli tests do, keeps both out of the guarded test body in
+# every checkout layout (see tests/tui_gateway/conftest.py).
+import hermes_cli.main  # noqa: F401
+
 
 def test_active_session_registry_home_override_is_opt_in_and_wins_explicit(monkeypatch, tmp_path):
     from hermes_cli import active_sessions

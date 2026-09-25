@@ -9,6 +9,12 @@ import pytest
 from starlette.websockets import WebSocket
 from websockets.asyncio.server import serve
 
+# Boot the process at collection, before the real-home I/O guard is armed: the
+# lazy ``from tui_gateway import ws`` below reaches hermes_bootstrap, whose
+# dependency activation stats the checkout's parent (see
+# tests/tui_gateway/conftest.py).
+import hermes_bootstrap  # noqa: F401
+
 
 class Client:
     def __init__(self, token):

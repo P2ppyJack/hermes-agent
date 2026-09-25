@@ -12,6 +12,12 @@ import pytest
 
 import agent.learning_mutations as lm
 
+# Boot the process at collection, before the real-home I/O guard is armed: the
+# context compressor's lazy import of agent.conversation_loop reaches
+# hermes_bootstrap, whose dependency activation stats the checkout's parent
+# (see tests/tui_gateway/conftest.py).
+import hermes_bootstrap  # noqa: F401
+
 
 class _FakeProvider:
     def __init__(self, messages):

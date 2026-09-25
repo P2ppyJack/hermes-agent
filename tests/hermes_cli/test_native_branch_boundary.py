@@ -3,6 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
+# Boot the process at collection, before the real-home I/O guard is armed: the
+# lazy ``import cli`` below reaches hermes_bootstrap, whose dependency
+# activation stats the checkout's parent (see tests/tui_gateway/conftest.py).
+import hermes_bootstrap  # noqa: F401
+
 
 @pytest.mark.parametrize("creation_fails", [False, True])
 def test_branch_fences_only_after_child_creation(monkeypatch, creation_fails):
