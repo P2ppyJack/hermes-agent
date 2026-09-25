@@ -584,6 +584,20 @@ async def pty_ws(ws: WebSocket) -> None:
 async def gateway_ws(ws: WebSocket) -> None:
     if not await _close_unless_sidecar_allowed(ws):
         return
+
+    # Relay only identity-less (legacy loopback-token) connections. A gated
+    # client carries a server-minted user_id/provider identity; relaying it to
+    # the Desktop backend over the backend's token URL would drop that identity
+    # (agent user_id scoping, browser-controller authz, bot-relay attribution).
+    # Such clients keep the stock in-process handler until a signed
+    # server-to-server identity handoff exists.
+    auth_identity = getattr(ws, "_hermes_auth_identity", None)
+    if auth_identity is None:
+        from hermes_cli.desktop_backend_attach import proxy_sidecar_to_desktop
+
+        if await proxy_sidecar_to_desktop(ws, getattr(ws, "_hermes_ws_subprotocol", None)):
+            return
+
     from hermes_cli.mcp_startup import start_deferred_mcp_discovery_now
     from tui_gateway.ws import handle_ws
 
@@ -596,7 +610,7 @@ async def gateway_ws(ws: WebSocket) -> None:
     # (browser.controller.register). None on the legacy token path.
     await handle_ws(
         ws,
-        auth_identity=getattr(ws, "_hermes_auth_identity", None),
+        auth_identity=auth_identity,
         subprotocol=getattr(ws, "_hermes_ws_subprotocol", None),
     )
 

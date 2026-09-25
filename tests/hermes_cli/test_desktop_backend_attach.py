@@ -45,6 +45,16 @@ def test_active_session_override_isolates_an_existing_owner(monkeypatch, tmp_pat
     try:
         assert phone is not None and refusal is None
         assert phone.state_path == mobile / "runtime" / "active_sessions.json"
+        duplicate, refusal = try_acquire_active_session(
+            session_id="shared", surface="tui", config={}, registry_home=root
+        )
+        assert duplicate is None and refusal is not None
+        monkeypatch.delenv("HERMES_ACTIVE_SESSIONS_HOME")
+        duplicate, refusal = try_acquire_active_session(
+            session_id="shared", surface="tui", config={}, registry_home=root
+        )
+        assert duplicate is None and refusal is not None
+        assert desktop.state_path == root / "runtime" / "active_sessions.json"
     finally:
         if phone is not None:
             phone.release()
@@ -92,6 +102,25 @@ def test_pty_attach_env_set_uses_proven_desktop_backend(monkeypatch, tmp_path):
     _argv, _cwd, env = chat._resolve_chat_argv()
 
     assert env["HERMES_TUI_GATEWAY_URL"] == backend.ws_url()
+
+
+@pytest.mark.parametrize("unavailable", [None, OSError("discovery unavailable")])
+def test_pty_unproven_discovery_preserves_stock_gateway(monkeypatch, tmp_path, unavailable):
+    chat = _prepare_chat_argv(monkeypatch, tmp_path)
+    from hermes_cli import desktop_backend_attach as attach
+
+    def discover():
+        if isinstance(unavailable, Exception):
+            raise unavailable
+        return unavailable
+
+    monkeypatch.setenv("HERMES_ATTACH_DESKTOP_BACKEND", "1")
+    monkeypatch.setattr(attach, "find_desktop_backend", discover)
+
+    _argv, _cwd, env = chat._resolve_chat_argv()
+
+    assert env is not None
+    assert env["HERMES_TUI_GATEWAY_URL"] == "ws://stock/api/ws?token=stock"
 
 
 def test_pty_attach_excludes_profile_scoped_chat(monkeypatch, tmp_path):
@@ -326,6 +355,28 @@ async def test_sidecar_relay_success_forwards_client_frame_and_completes(monkeyp
     assert client.subprotocol == "hermes-jsonrpc"
     assert upstream.sent == ['{"id":"1"}']
     assert upstream.closed is True
+
+
+@pytest.mark.asyncio
+async def test_sidecar_self_discovery_never_relays(monkeypatch):
+    """A Desktop backend that inherits the attach flag must not relay to itself."""
+    from hermes_cli import desktop_backend_attach as attach
+
+    client = _ClientSocket()
+    monkeypatch.setenv(attach.ATTACH_ENV_VAR, "1")
+    monkeypatch.setattr(
+        attach,
+        "find_desktop_backend",
+        lambda: attach.DesktopBackend(pid=os.getpid(), port=54321, token="fixture-token"),
+    )
+
+    async def no_dial(*_args, **_kwargs):
+        raise AssertionError("self-relay must never dial")
+
+    _install_fake_websockets(monkeypatch, no_dial)
+
+    assert await attach.proxy_sidecar_to_desktop(client) is False
+    assert client.accepted is False
 
 
 @pytest.mark.asyncio

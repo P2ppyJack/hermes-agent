@@ -177,11 +177,21 @@ async def proxy_sidecar_to_desktop(
     """
     if not sidecar_attach_enabled():
         return False
-    backend = find_desktop_backend()
+    # Process discovery + HTTP probe are blocking (psutil, socket); never hold
+    # the ASGI event loop during a candidate scan.
+    backend = await asyncio.to_thread(find_desktop_backend)
     if backend is None:
         logger.warning(
             "%s=1 but no live Desktop backend was proven; using in-process sidecar",
             ATTACH_ENV_VAR,
+        )
+        return False
+    if backend.pid == os.getpid():
+        # A Desktop backend inherits process.env, so it can discover its own
+        # listener and would otherwise relay to itself in an endless loop.
+        logger.warning(
+            "Desktop backend discovery found this process (pid=%s); refusing self-relay",
+            backend.pid,
         )
         return False
 

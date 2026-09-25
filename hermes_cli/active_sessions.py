@@ -169,6 +169,12 @@ def session_already_owned_message(session_id: str, entry: dict[str, Any]) -> str
 
 
 def _registry_home(registry_home: str | Path | None = None) -> Path:
+    # An explicitly isolated dashboard process tree may use a separate lease
+    # registry while retaining its normal HERMES_HOME for session storage.
+    # The durable turn lease in state.db remains shared and enforced.
+    override = os.environ.get("HERMES_ACTIVE_SESSIONS_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
     return Path(registry_home) if registry_home is not None else Path(get_hermes_home())
 
 

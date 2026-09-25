@@ -388,6 +388,21 @@ def _resolve_chat_argv(
     if profile_dir is None and (gateway_ws_url := _build_gateway_ws_url()):
         env["HERMES_TUI_GATEWAY_URL"] = gateway_ws_url
 
+    # Attach to the owner instead of spawning a competing session writer.
+    # Named-profile chats keep their own gateway and credential scope.
+    if profile_dir is None and os.environ.get("HERMES_ATTACH_DESKTOP_BACKEND") == "1":
+        try:
+            from hermes_cli.desktop_backend_attach import find_desktop_backend
+
+            backend = find_desktop_backend()
+            if backend is not None:
+                env["HERMES_TUI_GATEWAY_URL"] = backend.ws_url()
+                _log.info("Chat PTY attaching to Desktop backend pid=%s port=%s", backend.pid, backend.port)
+            else:
+                _log.warning("Desktop attach requested but no backend was proven; using this server's gateway")
+        except Exception:
+            _log.warning("Desktop-backend discovery failed; using this server's gateway", exc_info=True)
+
     return list(argv), str(cwd) if cwd else None, env
 
 
