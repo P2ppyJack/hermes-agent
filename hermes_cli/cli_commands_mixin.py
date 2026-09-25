@@ -6,6 +6,8 @@ the helpers/handlers via ``from cli import ...`` — cli.py imports this module 
 
 from __future__ import annotations
 
+from hermes_cli.cli_native_turn_mixin import fence_native_turn_sources_for
+
 import argparse
 import atexit
 import importlib
@@ -1309,6 +1311,7 @@ class CLICommandsMixin:
         target_id, session_meta = resolved
         if target_id == self.session_id:
             return _cp("  Already on that session.")
+        fence_native_turn_sources_for(self, "session_switch")
         old_session_id = self.session_id
         _end_current_session(self, "resumed_other")
         self.session_id, self._resumed, self._pending_title = target_id, True, None
@@ -1425,6 +1428,7 @@ class CLICommandsMixin:
                               "_branched_from": parent_session_id})
         except Exception as e:
             return _cp(f"  Failed to create branch session: {e}")
+        fence_native_turn_sources_for(self, "session_switch")
         _end_current_session(self, "branched")
         # Best-effort chunked copy (a failed copy still yields a usable branch); the api_content
         # sidecar lets the branch's first turn replay the parent's exact wire bytes (warm cache).
