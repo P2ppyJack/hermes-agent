@@ -12,6 +12,7 @@ import {
   isDesktopSlashCommand,
   isDesktopSlashExtensionCommand,
   isDesktopSlashSuggestion,
+  isDesktopSlashSuggestionWithOptions,
   isModelPickerCommand,
   isPickerCommand,
   rankSkillCommands,
@@ -152,9 +153,10 @@ describe('desktop slash command curation', () => {
   })
 
   it('still routes commands without dedicated RPCs through exec()', () => {
-    // /btw is an action (prompt.btw) — the slash-worker print never reached Desktop.
+    // /bg (/background) and /btw deliberately are not here: each has a
+    // dedicated prompt action because slash-worker output arrived too late for
+    // the originating Desktop conversation.
     const execNames = [
-      '/bg',
       '/debug',
       '/goal',
       '/personality',
@@ -182,6 +184,7 @@ describe('desktop slash command curation', () => {
     expect(desktopSlashCommandArgumentMode('/goal')).toBe('mixed')
     expect(desktopSlashCommandArgumentMode('/steer')).toBe('text')
     expect(desktopSlashCommandArgumentMode('/queue')).toBe('text')
+    expect(desktopSlashCommandArgumentMode('/background')).toBe('text')
     expect(desktopSlashCommandArgumentMode('/personality')).toBe('options')
     expect(desktopSlashCommandArgumentMode('/handoff')).toBe('options')
     expect(desktopSlashCommandArgumentMode('/version')).toBeNull()
@@ -228,14 +231,35 @@ describe('desktop slash command curation', () => {
     // Excludes hidden, unavailable, aliases, and registry-backed commands.
     const names = new Set(all.map(item => item.text))
     expect(names.has('/model')).toBe(false) // hidden
-    expect(names.has('/clear')).toBe(false) // unavailable (terminal-only)
+    expect(names.has('/clear')).toBe(false) // alias of /new
     expect(names.has('/memory-graph')).toBe(false) // alias of /journey
     expect(names.has('/journey')).toBe(false) // supplied by the backend registry
   })
-
   it('allows aliases to execute without cluttering the popover', () => {
     expect(isDesktopSlashSuggestion('/reset')).toBe(false)
     expect(isDesktopSlashCommand('/reset')).toBe(true)
+    // Help advertises `/clear` as "start a new session". On the TUI that
+    // also clears the terminal screen; on desktop it must take the same
+    // path as `/new` instead of being marked terminal-only (#95779).
+    expect(isDesktopSlashSuggestion('/clear')).toBe(false)
+    expect(isDesktopSlashCommand('/clear')).toBe(true)
+    expect(resolveDesktopCommand('/clear')?.surface).toEqual({ kind: 'action', action: 'new' })
+  })
+
+  it('surfaces an alias the user typed exactly, gated on desktop availability (#57641)', () => {
+    // Browsing (no exact query): aliases stay hidden — popover stays lean.
+    expect(isDesktopSlashSuggestionWithOptions('/reset')).toBe(false)
+    // Exact typed query: the alias must appear, not "no matches".
+    expect(isDesktopSlashSuggestionWithOptions('/reset', { exactAlias: '/reset' })).toBe(true)
+    expect(isDesktopSlashSuggestionWithOptions('/reset', { exactAlias: 'reset' })).toBe(true)
+    // Partial prefixes and other queries keep aliases hidden.
+    expect(isDesktopSlashSuggestionWithOptions('/reset', { exactAlias: 're' })).toBe(false)
+    expect(isDesktopSlashSuggestionWithOptions('/reset', { exactAlias: '/new' })).toBe(false)
+    // A different alias never rides along with this query.
+    expect(isDesktopSlashSuggestionWithOptions('/fork', { exactAlias: '/reset' })).toBe(false)
+    // Aliases whose canonical has no desktop surface stay hidden even on an
+    // exact match (isDesktopSlashCommand gate).
+    expect(isDesktopSlashSuggestionWithOptions('/reload_mcp', { exactAlias: '/reload_mcp' })).toBe(false)
   })
 
   it('filters built-in catalog noise but keeps skill / quick-command extensions', () => {
@@ -337,9 +361,10 @@ describe('desktop slash command curation', () => {
   it('resolves commands and aliases to their declared surface', () => {
     expect(resolveDesktopCommand('/new')?.surface).toEqual({ kind: 'action', action: 'new' })
     expect(resolveDesktopCommand('/reset')?.surface).toEqual({ kind: 'action', action: 'new' })
+    expect(resolveDesktopCommand('/clear')?.surface).toEqual({ kind: 'action', action: 'new' })
     expect(resolveDesktopCommand('/resume')?.surface).toEqual({ kind: 'picker', picker: 'session' })
     expect(resolveDesktopCommand('/usage')?.surface).toEqual({ kind: 'exec' })
-    expect(resolveDesktopCommand('/clear')?.surface).toEqual({ kind: 'unavailable', reason: 'terminal' })
+    expect(desktopSlashUnavailableMessage('/clear')).toBeNull()
     // Skill / quick commands aren't in the registry.
     expect(resolveDesktopCommand('/gif-search')).toBeNull()
   })

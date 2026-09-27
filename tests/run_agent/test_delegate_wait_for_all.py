@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 from run_agent import AIAgent
 from tools.delegate_tool import _build_dynamic_schema_overrides
@@ -19,7 +18,7 @@ from tools.registry import registry
 def _write_delegation_config(home, monkeypatch, **delegation):
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text(
-        yaml.safe_dump({"delegation": delegation}), encoding="utf-8"
+        json.dumps({"delegation": delegation}) + "\n", encoding="utf-8"
     )
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setenv("HERMES_MANAGED_DIR", str(home / "missing-managed"))
