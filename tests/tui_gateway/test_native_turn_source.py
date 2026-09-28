@@ -191,3 +191,42 @@ def test_human_reservation_wins_race_after_native_poll(monkeypatch, tmp_path):
     assert not thread.is_alive()
     assert result == [False]
     assert aborted and aborted[0][0] == "not_sent"
+
+
+def test_native_compatible_submit_scopes_child_run_check_to_profile_home(monkeypatch):
+    """The native-admission lock refactor must retain upstream's profile-scoped child check."""
+    session = {
+        "history_lock": threading.RLock(),
+        "lazy": True,
+        "session_key": "route-key",
+        "profile_home": "/profiles/worker-a",
+    }
+    observed = []
+    monkeypatch.setattr(
+        server,
+        "_child_run_active",
+        lambda session_key, profile_home=None: observed.append((session_key, profile_home)) or False,
+    )
+    monkeypatch.setattr(
+        server,
+        "_start_inflight_turn",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with session["history_lock"]:
+        err, fields = server._lock_in_submit_turn(  # type: ignore[attr-defined]
+            "rid",
+            "sid",
+            session,
+            "native turn",
+            {},
+            False,
+            None,
+            None,
+            None,
+            lock_held=True,
+        )
+
+    assert err is None
+    assert fields == {}
+    assert observed == [("route-key", "/profiles/worker-a")]
