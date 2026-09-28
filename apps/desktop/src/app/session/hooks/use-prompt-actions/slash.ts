@@ -37,6 +37,7 @@ import {
   $connection,
   $sessions,
   $yoloActive,
+  applySessionTitle,
   setActiveSessionId,
   setCurrentUsage,
   setModelPickerOpen,
@@ -1067,7 +1068,10 @@ export function useSlashCommand(deps: SlashCommandDeps) {
             const finalTitle = (result?.title || arg).trim()
             const queued = result?.pending === true
 
-            setSessions(prev => prev.map(s => (s.id === sessionId ? { ...s, title: finalTitle || null } : s)))
+            // Patch every sidebar slice (lineage-aware), then refresh the
+            // project surfaces — a bare-id recents patch left project rows
+            // stale until a profile switch (#123337).
+            applySessionTitle(sessionId, finalTitle || null)
             await refreshSessions().catch(() => undefined)
             renderSlashOutput(
               finalTitle
