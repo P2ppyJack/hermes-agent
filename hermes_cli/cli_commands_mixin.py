@@ -322,6 +322,9 @@ def _parse_cron_flags(tokens):
 def _end_current_session(cli, reason: str) -> None:
     """Flush un-persisted messages, then end the current session row with ``reason``.
     Best-effort on both steps (the switch proceeds even if the DB write fails)."""
+    # Fence native turn sources before this identity rotates: a pending outer
+    # wake must not be delivered into the resumed/branched session.
+    fence_native_turn_sources_for(cli, "session_switch")
     if cli.agent:
         with suppress(Exception):
             cli.agent._flush_messages_to_session_db(
@@ -1303,7 +1306,6 @@ class CLICommandsMixin:
         target_id, session_meta = resolved
         if target_id == self.session_id:
             return _cp(f"  {_t('resume.already_on')}")
-        fence_native_turn_sources_for(self, "session_switch")
         old_session_id = self.session_id
         _end_current_session(self, "resumed_other")
         self.session_id, self._resumed, self._pending_title = target_id, True, None
@@ -1417,7 +1419,6 @@ class CLICommandsMixin:
                               "_branched_from": parent_session_id})
         except Exception as e:
             return _cp(f"  {_gt('branch.create_failed', error=e)}")
-        fence_native_turn_sources_for(self, "session_switch")
         _end_current_session(self, "branched")
         # Best-effort chunked copy (a failed copy still yields a usable branch); the api_content
         # sidecar lets the branch's first turn replay the parent's exact wire bytes (warm cache).

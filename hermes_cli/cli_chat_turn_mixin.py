@@ -431,11 +431,11 @@ class CLIChatTurnMixin:
                     pass
                 interrupt_msg = None
                 continue
-            _cprint(f"\n{t('cli.chat.new_message_interrupting')}")
             try:
                 self._fence_native_turn_sources("user_turn")
             except Exception:
                 pass
+            _cprint(f"\n{t('cli.chat.new_message_interrupting')}")
             if turn.stop_event is not None:
                 turn.stop_event.set()
             self.agent.interrupt(interrupt_msg)

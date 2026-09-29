@@ -66,7 +66,10 @@ force.
 Before a stop, new session, session switch, close, or process exit releases or
 rotates identity, Hermes calls `on_user_boundary` synchronously for the exact
 old session. Callback failures are isolated and logged rather than changing the
-host lifecycle operation.
+host lifecycle operation. An admission polled before such a boundary is declined
+at `commit()` and its lease aborted with `not_sent` once the boundary's epoch
+advanced, so a lease that raced a user boundary is never delivered into a
+rotated session.
 
 ## Discovery and lifecycle
 

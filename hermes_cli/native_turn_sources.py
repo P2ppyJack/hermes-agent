@@ -110,11 +110,24 @@ class RegisteredNativeTurnSource:
     plugin_id: str
 
 
+@dataclass(eq=False)
+class _SessionBoundaryState:
+    """Per-session boundary coordination: the poll/fence lock plus an epoch.
+
+    The epoch advances on every fence (user boundary). An admission polled
+    before the boundary observes a stale epoch and refuses to commit, so a
+    lease that raced a stop/switch/close is aborted instead of delivered.
+    """
+
+    lock: threading.RLock
+    epoch: int = 0
+
+
 _PROFILE_SOURCES_LOCK = threading.RLock()
 _PROFILE_SOURCES: dict[str, dict[str, RegisteredNativeTurnSource]] = {}
-_SESSION_BOUNDARY_LOCKS_LOCK = threading.Lock()
-_SESSION_BOUNDARY_LOCKS: weakref.WeakValueDictionary[
-    tuple[str, ...], threading.RLock
+_SESSION_BOUNDARY_STATES_LOCK = threading.Lock()
+_SESSION_BOUNDARY_STATES: weakref.WeakValueDictionary[
+    tuple[str, ...], _SessionBoundaryState
 ] = weakref.WeakValueDictionary()
 
 
@@ -171,11 +184,18 @@ class NativeTurnAdmission:
         lease: NativeTurnLease,
         session: NativeSessionView,
         boundary_lock: threading.RLock | None = None,
+        boundary_state: _SessionBoundaryState | None = None,
     ):
         self.lease = lease
         self.session = session
         self._lock = threading.Lock()
-        self._boundary_lock = boundary_lock or threading.RLock()
+        if boundary_state is None:
+            boundary_state = _SessionBoundaryState(
+                lock=boundary_lock or threading.RLock()
+            )
+        self._boundary_state = boundary_state
+        self._boundary_lock = boundary_state.lock
+        self._observed_epoch = boundary_state.epoch
         self._state: str = "open"
 
     @property
@@ -187,6 +207,15 @@ class NativeTurnAdmission:
         with self._boundary_lock, self._lock:
             if self._state != "open":
                 return self._state == "committed"
+            if self._boundary_state.epoch != self._observed_epoch:
+                self._state = "not_sent"
+                try:
+                    self.lease.abort(
+                        "not_sent", "session boundary advanced before admission"
+                    )
+                except Exception:
+                    logger.warning("Native lease not_sent abort failed", exc_info=True)
+                return False
             try:
                 accepted = self.lease.commit(self.session)
             except Exception as exc:
@@ -245,6 +274,7 @@ def poll_registered_sources(
     session: NativeSessionView,
     *,
     boundary_lock: threading.RLock | None = None,
+    boundary_state: _SessionBoundaryState | None = None,
 ) -> NativeTurnAdmission | None:
     """Poll a stable registration snapshot; source failures are fail-inert."""
     for registration in tuple(registrations.values()):
@@ -264,7 +294,9 @@ def poll_registered_sources(
                 "Native turn source %s returned an invalid lease", registration.plugin_id
             )
             continue
-        return NativeTurnAdmission(lease, session, boundary_lock)
+        return NativeTurnAdmission(
+            lease, session, boundary_lock=boundary_lock, boundary_state=boundary_state
+        )
     return None
 
 
@@ -292,8 +324,8 @@ def _profile_registrations(
     return _profile_source_snapshot(profile_home)
 
 
-def _session_boundary_lock(session: NativeSessionView) -> threading.RLock:
-    key = (
+def _session_boundary_key(session: NativeSessionView) -> tuple[str, ...]:
+    return (
         hermes_home_key(session.profile_home),
         session.profile,
         session.surface,
@@ -302,28 +334,39 @@ def _session_boundary_lock(session: NativeSessionView) -> threading.RLock:
         session.owner_token or "",
         *session.compression_lineage,
     )
-    with _SESSION_BOUNDARY_LOCKS_LOCK:
-        lock = _SESSION_BOUNDARY_LOCKS.get(key)
-        if lock is None:
-            lock = threading.RLock()
-            _SESSION_BOUNDARY_LOCKS[key] = lock
-        return lock
+
+
+def _session_boundary_state(session: NativeSessionView) -> _SessionBoundaryState:
+    """Return (creating if needed) the boundary state for one exact session."""
+    key = _session_boundary_key(session)
+    with _SESSION_BOUNDARY_STATES_LOCK:
+        state = _SESSION_BOUNDARY_STATES.get(key)
+        if state is None:
+            state = _SessionBoundaryState(lock=threading.RLock())
+            _SESSION_BOUNDARY_STATES[key] = state
+        return state
+
+
+def _session_boundary_lock(session: NativeSessionView) -> threading.RLock:
+    return _session_boundary_state(session).lock
 
 
 def poll_native_turn(session: NativeSessionView) -> NativeTurnAdmission | None:
     """Poll sources installed in ``session``'s profile; no source is an inert default."""
-    lock = _session_boundary_lock(session)
-    with lock:
+    state = _session_boundary_state(session)
+    with state.lock:
         return poll_registered_sources(
             _profile_registrations(session.profile_home),
             session,
-            boundary_lock=lock,
+            boundary_state=state,
         )
 
 
 def fence_native_turn_sources(session: NativeSessionView, reason: str) -> None:
     """Synchronously fence native work in ``session``'s exact profile."""
-    with _session_boundary_lock(session):
+    state = _session_boundary_state(session)
+    with state.lock:
         fence_registered_sources(
             _profile_registrations(session.profile_home), session, reason
         )
+        state.epoch += 1

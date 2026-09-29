@@ -320,6 +320,37 @@ def test_boundary_waits_for_inflight_pre_model_commit(tmp_path):
         unregister()
 
 
+def test_commit_after_boundary_declines_stale_admission(tmp_path):
+    """A lease polled before a user boundary must not commit after it.
+
+    The fence advances the session's boundary epoch; the admission observed the
+    older epoch, so commit declines (``not_sent``) and aborts the lease instead
+    of delivering a turn that raced the boundary.
+    """
+    session = view(tmp_path)
+    calls = []
+    lease = NativeTurnLease(
+        "race-boundary",
+        "continue",
+        lambda _seen: calls.append("commit") or True,
+        lambda outcome, reason: calls.append((outcome, reason)),
+    )
+    source = Source(lease)
+    unregister = register_profile_source(
+        tmp_path,
+        RegisteredNativeTurnSource(source, frozenset({"cli"}), "test:race-boundary"),
+    )
+    try:
+        admission = poll_native_turn(session)
+        assert admission is not None
+        fence_native_turn_sources(session, "stop")
+        assert admission.commit() is False
+        assert admission.commit() is False
+        assert calls == [("not_sent", "session boundary advanced before admission")]
+    finally:
+        unregister()
+
+
 def test_same_boundary_concurrent_polls_remain_serial_during_gc(tmp_path):
     from hermes_cli import native_turn_sources as native
 
@@ -381,15 +412,15 @@ def test_same_boundary_concurrent_polls_remain_serial_during_gc(tmp_path):
         unregister()
         admissions.clear()
         gc.collect()
-        with native._SESSION_BOUNDARY_LOCKS_LOCK:
-            assert len(native._SESSION_BOUNDARY_LOCKS) <= 1
+        with native._SESSION_BOUNDARY_STATES_LOCK:
+            assert len(native._SESSION_BOUNDARY_STATES) <= 1
 
 
 def test_boundary_lock_cache_reclaims_one_thousand_compression_lineages(tmp_path):
     from hermes_cli import native_turn_sources as native
 
-    with native._SESSION_BOUNDARY_LOCKS_LOCK:
-        native._SESSION_BOUNDARY_LOCKS.clear()
+    with native._SESSION_BOUNDARY_STATES_LOCK:
+        native._SESSION_BOUNDARY_STATES.clear()
 
     lineage = []
     for index in range(1000):
@@ -408,5 +439,5 @@ def test_boundary_lock_cache_reclaims_one_thousand_compression_lineages(tmp_path
         )
 
     gc.collect()
-    with native._SESSION_BOUNDARY_LOCKS_LOCK:
-        assert len(native._SESSION_BOUNDARY_LOCKS) <= 1
+    with native._SESSION_BOUNDARY_STATES_LOCK:
+        assert len(native._SESSION_BOUNDARY_STATES) <= 1

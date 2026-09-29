@@ -950,16 +950,16 @@ class CLITuiMixin:
             return
         if self._agent_running and self.agent:
             if now - self._last_ctrl_c_time < 2.0:
-                print("\n" + t("cli.tui.force_exiting"))
                 with suppress(Exception):
                     self._fence_native_turn_sources("user_exit")
+                print("\n" + t("cli.tui.force_exiting"))
                 self._should_exit = True
                 event.app.exit()
                 return
             self._last_ctrl_c_time = now
-            print("\n" + t("cli.tui.interrupting_again_hint"))
             with suppress(Exception):
                 self._fence_native_turn_sources("user_stop")
+            print("\n" + t("cli.tui.interrupting_again_hint"))
             request_hard_interrupt(self.agent)
         else:
             self._tui_clear_or_exit(event)
@@ -976,9 +976,9 @@ class CLITuiMixin:
         if overlay_cleared and not (self._agent_running and self.agent):
             return
         if self._agent_running and self.agent:
-            print("\n" + t("cli.tui.interrupting"))
             with suppress(Exception):
                 self._fence_native_turn_sources("user_stop")
+            print("\n" + t("cli.tui.interrupting"))
             request_hard_interrupt(self.agent)
         else:
             self._tui_clear_or_exit(event)
