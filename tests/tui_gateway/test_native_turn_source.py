@@ -230,3 +230,67 @@ def test_native_compatible_submit_scopes_child_run_check_to_profile_home(monkeyp
     assert err is None
     assert fields == {}
     assert observed == [("route-key", "/profiles/worker-a")]
+
+
+def test_native_poller_refuses_profile_scoped_active_child(monkeypatch, tmp_path):
+    """Native admission must apply the same profile-scoped child guard as human submit."""
+    sid = "native-child-active"
+    profile_home = str(tmp_path / "worker-a")
+    owner = SimpleNamespace(lease_id="owner-child", released=False)
+    session = {
+        "agent": SimpleNamespace(session_id="native-child-session"),
+        "history_lock": threading.RLock(),
+        "running": False,
+        "active_session_lease": owner,
+        "queued_prompt": None,
+        "queued_prompts": [],
+        "profile_home": profile_home,
+        "profile_name": "worker-a",
+        "session_key": "child-route",
+        "lazy": True,
+    }
+    view = NativeSessionView(
+        profile="worker-a",
+        profile_home=tmp_path / "worker-a",
+        session_id="native-child-session",
+        surface="tui",
+        compression_lineage=("native-child-session",),
+        session_key="child-route",
+        owner_token="owner-child",
+    )
+    aborted = []
+    admission = NativeTurnAdmission(
+        NativeTurnLease(
+            "lease-child",
+            "continue after child",
+            lambda _view: True,
+            lambda outcome, reason: aborted.append((outcome, reason)),
+        ),
+        view,
+    )
+    observed = []
+    monkeypatch.setattr(server, "_native_session_view", lambda *_args: view)
+    monkeypatch.setattr("hermes_cli.native_turn_sources.poll_native_turn", lambda _view: admission)
+    monkeypatch.setattr(
+        server,
+        "_child_run_active",
+        lambda session_key, seen_home=None: observed.append(
+            (session_key, seen_home, session["history_lock"]._is_owned())
+        ) or True,
+    )
+    monkeypatch.setattr(
+        server,
+        "_run_prompt_submit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("native turn must not start while the profile-scoped child is active")
+        ),
+    )
+    server._sessions[sid] = session
+    try:
+        assert server._poll_native_turn_once(sid, session) is False  # type: ignore[attr-defined]
+    finally:
+        server._sessions.pop(sid, None)
+
+    assert observed == [("child-route", profile_home, True)]
+    assert aborted and aborted[0][0] == "not_sent"
+    assert session["running"] is False

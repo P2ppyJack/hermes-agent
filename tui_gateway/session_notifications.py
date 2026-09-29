@@ -837,11 +837,18 @@ def _poll_native_turn_once(sid: str, session: dict) -> bool:
     with _sessions_lock:
         with session["history_lock"]:
             active_lease = session.get("active_session_lease")
+            # Native wake admission must honor the same profile-scoped child guard as
+            # human submit; otherwise a lazy watch session can race its live child.
+            child_active = session.get("lazy") and _child_run_active(  # type: ignore[name-defined]
+                str(session.get("session_key") or ""),
+                session.get("profile_home") or None,
+            )
             eligible = (
                 _sessions.get(sid) is session
                 and not session.get("_finalized")
                 and not session.get("_closing")
                 and not session.get("running")
+                and not child_active
                 and active_lease is not None
                 and not getattr(active_lease, "released", False)
                 and str(getattr(active_lease, "lease_id", "") or "")
