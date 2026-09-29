@@ -29,3 +29,24 @@ describe('photon messaging source registration', () => {
     expect(isMessagingSource(undefined)).toBe(false)
   })
 })
+
+// imsg sessions (the iMessage self-chat control channel / one-shot handlers,
+// HERMES_SESSION_SOURCE=imsg) live in the sidebar's own "iMessage" messaging
+// section, mirroring photon: isMessagingSource() is the sole condition that
+// keeps them out of generic recents, so this pins the contract.
+describe('imsg messaging source registration', () => {
+  it('treats imsg as a messaging source (own sidebar section)', () => {
+    expect(isMessagingSource('imsg')).toBe(true)
+  })
+
+  it('is case/space insensitive on the source id', () => {
+    expect(isMessagingSource('IMSG')).toBe(true)
+    expect(isMessagingSource('  imsg ')).toBe(true)
+  })
+
+  it('labels imsg sessions as iMessage and exposes search aliases', () => {
+    const terms = sessionSourceSearchTerms('imsg')
+    expect(terms).toContain('imessage')
+    expect(terms).toContain('messages')
+  })
+})

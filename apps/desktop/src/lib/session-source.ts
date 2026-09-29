@@ -10,6 +10,7 @@ const SOURCE_LABELS: Record<string, string> = {
   discord: 'Discord',
   email: 'Email',
   gateway: 'Gateway',
+  imsg: 'iMessage',
   kanban: 'Kanban',
   local: 'Local',
   matrix: 'Matrix',
@@ -30,6 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const SOURCE_ALIASES: Record<string, string[]> = {
   bluebubbles: ['apple messages', 'imessage'],
+  imsg: ['imessage', 'messages', 'self-chat'],
   photon: ['imessage', 'messages'],
   cli: ['terminal'],
   desktop: ['app', 'gui'],
@@ -72,6 +74,7 @@ export const MESSAGING_SESSION_SOURCE_IDS = [
   'whatsapp',
   'bluebubbles',
   'photon',
+  'imsg',
   'homeassistant',
   'email',
   'sms',
