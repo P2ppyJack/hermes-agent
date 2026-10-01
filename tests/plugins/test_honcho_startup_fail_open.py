@@ -50,6 +50,56 @@ def _configured_tools_config(*, init_on_session_start: bool = False) -> _FakeHon
     return cfg
 
 
+class _FakeSession:
+    messages: list = []
+
+
+class _FakeSessionManager:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def get_or_create(self, session_key):
+        return _FakeSession()
+
+    def migrate_memory_files(self, session_key, memories_dir):
+        pass
+
+
+def _patch_session_init_dependencies(monkeypatch):
+    monkeypatch.setattr("plugins.memory.honcho.client.get_honcho_client", lambda cfg: object())
+    monkeypatch.setattr("plugins.memory.honcho.session.HonchoSessionManager", _FakeSessionManager)
+
+
+def test_honcho_dashboard_pty_skips_generic_dialectic_prewarm(monkeypatch):
+    """Opening/reconnecting the browser dashboard chat must not fan out a cold
+    Honcho dialectic for an empty PTY before the user sends a prompt."""
+    _patch_session_init_dependencies(monkeypatch)
+    monkeypatch.setenv("HERMES_TUI_DASHBOARD", "1")
+    provider = HonchoMemoryProvider()
+    spawned = []
+    monkeypatch.setattr(provider, "_spawn_dialectic", lambda *args, **kwargs: spawned.append((args, kwargs)))
+
+    provider._do_session_init(_configured_hybrid_config(), "session-1", user_id="alice")
+
+    assert provider._session_initialized is True
+    assert spawned == []
+
+
+def test_honcho_non_dashboard_session_keeps_generic_dialectic_prewarm(monkeypatch):
+    """The dashboard guard must not remove the existing prewarm path for normal
+    interactive sessions."""
+    _patch_session_init_dependencies(monkeypatch)
+    monkeypatch.delenv("HERMES_TUI_DASHBOARD", raising=False)
+    provider = HonchoMemoryProvider()
+    spawned = []
+    monkeypatch.setattr(provider, "_spawn_dialectic", lambda *args, **kwargs: spawned.append((args, kwargs)))
+
+    provider._do_session_init(_configured_hybrid_config(), "session-1", user_id="alice")
+
+    assert provider._session_initialized is True
+    assert len(spawned) == 1
+
+
 
 
 def test_stalled_init_only_delays_first_turn_prefetch(monkeypatch):

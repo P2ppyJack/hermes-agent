@@ -516,12 +516,21 @@ class HonchoMemoryProvider(DialecticMixin, MemoryProvider):
                 logger.debug("Honcho memory file migration skipped: %s", e)
 
         # Generic dialectic prewarm is incompatible with latest-message query rewriting,
-        # which needs the first substantive user message.
+        # which needs the first substantive user message.  Dashboard PTY sessions also
+        # skip it: the browser chat tab can reconnect/recreate empty PTYs under gated
+        # auth, and a per-empty-session "who is this user?" dialectic fan-out slams
+        # shared Honcho/vLLM even though no human prompt has been sent yet.  The first
+        # real turn still performs query-specific prefetch, so dashboard chat keeps
+        # memory recall without paying an eager cold-start storm.
         if self._recall_mode in {"context", "hybrid"} and not self._recall_sync:
+            dashboard_pty = os.environ.get("HERMES_TUI_DASHBOARD") == "1"
             if self._query_rewriter is None or not self._query_rewrite_enabled:
-                self._spawn_dialectic(_PREWARM_QUERY, thread_name="honcho-prewarm-dialectic", fired_at=0,
-                                      log_label="dialectic prewarm", use_query_rewrite=False)
-                logger.debug("Honcho dialectic prewarm started for session: %s", self._session_key)
+                if dashboard_pty:
+                    logger.debug("Honcho generic dialectic prewarm skipped for dashboard PTY: %s", self._session_key)
+                else:
+                    self._spawn_dialectic(_PREWARM_QUERY, thread_name="honcho-prewarm-dialectic", fired_at=0,
+                                          log_label="dialectic prewarm", use_query_rewrite=False)
+                    logger.debug("Honcho dialectic prewarm started for session: %s", self._session_key)
             else:
                 logger.debug("Honcho generic dialectic prewarm skipped: awaiting first user message")
 
