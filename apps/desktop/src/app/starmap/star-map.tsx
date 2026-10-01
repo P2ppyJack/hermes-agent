@@ -13,6 +13,7 @@ import type { StarmapGraph } from '@/types/hermes'
 
 import { computePalette, conclusionInkFor, memoryInkFor, resolveRgb, rgba } from './color'
 import { RING_OUTER, TILT, ZOOM_MAX, ZOOM_MIN } from './constants'
+import { registerStarMapContextMenu } from './context-menu-handle'
 import { clamp, distToSegmentSq, fitScale, fitViewport, nodeRadius } from './geometry'
 import { NodeContextMenu, type NodeMenuTarget } from './node-context-menu'
 import { NodeSessionsDialog } from './node-sessions-dialog'
@@ -322,11 +323,13 @@ export function StarMap({
     [invalidate]
   )
 
-  const openNodeMenuAt = useCallback((id: string, x: number, y: number) => {
+  const openNodeMenuById = useCallback((id: string, x: number, y: number): boolean => {
     const node = byIdRef.current.get(id)
 
     if (!node) {
-      return
+      setMenuTarget(null)
+
+      return false
     }
 
     setSelectedId(id)
@@ -345,6 +348,8 @@ export function StarMap({
       x,
       y
     })
+
+    return true
   }, [])
 
   const memById = useMemo(() => {
@@ -864,7 +869,7 @@ export function StarMap({
   }, [invalidate, size])
 
   // ── Pointer interactions (invert the tilted projection for hit-testing) ─────
-  const pickNode = (cssX: number, cssY: number): null | SimNode => {
+  const pickNode = useCallback((cssX: number, cssY: number): null | SimNode => {
     const vp = viewportRef.current
     // Hit radius mirrors the billboarded draw: rested fit scale, screen space.
     const nodeK = fitScale(sizeRef.current.w, sizeRef.current.h, ringsRef.current)
@@ -890,7 +895,7 @@ export function StarMap({
     }
 
     return best
-  }
+  }, [])
 
   // Nearest link within ~5px of the cursor (screen space), or null.
   const pickLink = (cssX: number, cssY: number): null | string => {
@@ -939,6 +944,28 @@ export function StarMap({
 
     return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) }
   }
+
+  const openNodeMenuAt = useCallback(
+    (clientX: number, clientY: number): boolean => {
+      const rect = canvasRef.current?.getBoundingClientRect()
+      const node = pickNode(clientX - (rect?.left ?? 0), clientY - (rect?.top ?? 0))
+
+      if (!node) {
+        setMenuTarget(null)
+
+        return false
+      }
+
+      return openNodeMenuById(node.id, clientX, clientY)
+    },
+    [openNodeMenuById, pickNode]
+  )
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+
+    return canvas ? registerStarMapContextMenu(canvas, { openNodeMenuAt }) : undefined
+  }, [openNodeMenuAt])
 
   const resetView = () => {
     setPlaying(false)
@@ -1075,30 +1102,9 @@ export function StarMap({
   }
 
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault()
-    const { x, y } = localXY(e)
-    const node = pickNode(x, y)
-
-    if (!node) {
-      return setMenuTarget(null)
+    if (openNodeMenuAt(e.clientX, e.clientY)) {
+      e.preventDefault()
     }
-
-    setSelectedId(node.id)
-    setMenuTarget({
-      id: node.id,
-      isConclusion: !!conclusionIdsRef.current?.has(node.id),
-      kind: node.kind === 'memory' ? 'memory' : 'skill',
-      label: node.label,
-      // Pass the node's source so provider-backed nodes (Honcho conclusions,
-      // profile memory) correctly show the read-only hint + conclusion action —
-      // the canvas path previously dropped this, unlike the sidebar path.
-      memorySource: node.memorySource,
-      // Multi-profile mode: pass the profile and original id for cross-profile ops
-      profile: node.profile,
-      _originalId: node._originalId,
-      x: e.clientX,
-      y: e.clientY
-    })
   }
 
   const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1130,7 +1136,6 @@ export function StarMap({
     <div className="relative min-h-0 flex-1 overflow-hidden" ref={wrapRef}>
       <canvas
         className="block touch-none select-none text-foreground"
-        data-hermes-context-menu-trigger=""
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
         onMouseDown={onMouseDown}
@@ -1269,7 +1274,7 @@ export function StarMap({
             onClose={() => setSearchOpen(false)}
             onFocusNode={focusNode}
             onMatchesChange={onMatchesChange}
-            onNodeMenu={openNodeMenuAt}
+            onNodeMenu={openNodeMenuById}
             onRegisterClear={registerClearFilters}
             showConclusions={showConclusions}
           />
